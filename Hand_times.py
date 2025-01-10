@@ -9,6 +9,7 @@ import numpy as np
 import rpy2.robjects as ro
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
+import plotly.graph_objects as go
 
 from rpy2.robjects import globalenv
 from rpy2.robjects import r, pandas2ri, StrVector
@@ -20,55 +21,72 @@ import rpy2.robjects as robjects
 #Streamlit App building
 
 st.title('RCA Hand Time Monitoring')
-user_name = st.text_input('Enter your Username')
-password = st.text_input("Enter your Password", type="password")
-col1, col2 = st.columns(2)
-with col1: 
-    start = st.date_input('Start Date', datetime.now() - relativedelta(months=1))
-    start_str = start.strftime('%d/%m/%Y')
 
-with col2: 
-    end = st.date_input('End Date', datetime.now())
-    end_str = end.strftime('%d/%m/%Y')
+# Initialize session state for login
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+    st.session_state.username = ""
+    st.session_state.password = ""
+    st.session_state.start_str = ""
+    st.session_state.end_str = ""
+    st.session_state.r_df = pd.DataFrame()
 
+if not st.session_state.logged_in:
+    # Login form
+    user_name = st.text_input('Enter your Username')
+    password = st.text_input("Enter your Password", type="password")
+    login = st.button('Login')
+        # Date range selection
+    col1, col2 = st.columns(2)
+    with col1:
+        start = st.date_input('Start Date', datetime.now() - relativedelta(months=1))
+        st.session_state.start_str = start.strftime('%d/%m/%Y')
 
-login = st.button('login')
+    with col2:
+        end = st.date_input('End Date', datetime.now())
+        st.session_state.end_str = end.strftime('%d/%m/%Y')
 
-if login: 
-
-    pandas2ri.activate()
-
-    r_script = """
-    library(smartabaseR)
-    start_date <- "{start}"
-    end_date <- "{end}"
-
-    cat("Start Date as Date object:", start_date, "\\n")
-    cat("End Date as Date object:", end_date, "\\n")
-
-    df_sb <- sb_get_event(
-    form = "RCA Hand Time Monitoring",
-    date_range = c(start_date,end_date),
-    url = "https://canadiansport.smartabase.com/csip",
-    username = "{username}",
-    password = "{password}",
-    option = sb_get_event_option(
-        cache = TRUE
-    )
-    )
-    df_sb <- as.data.frame(df_sb)
+    if login:
+        st.session_state.username = user_name
+        st.session_state.password = password
+        st.session_state.logged_in = True
+        st.success("Logged in successfully!")
+else:
+    st.write(f"Logged in as: {st.session_state.username}")
 
 
-    """
-    # Execute the R script
-    # Execute the R script
-    r_script = r_script.format(start=start_str, end=end_str, username = user_name, password = password) 
-    #r(r_script)
-    robjects.r(r_script) 
+    fetch_data = True
 
-    # Retrieve the R object explicitly in a conversion context
-    with localconverter(pandas2ri.converter):
-        r_df = r("df_sb")
+    if fetch_data:
+        # Fetch data using stored credentials
+        pandas2ri.activate()
+        r_script = f"""
+        library(smartabaseR)
+        start_date <- "{st.session_state.start_str}"
+        end_date <- "{st.session_state.end_str}"
+
+        df_sb <- sb_get_event(
+            form = "RCA Hand Time Monitoring",
+            date_range = c(start_date, end_date),
+            url = "https://canadiansport.smartabase.com/csip",
+            username = "{st.session_state.username}",
+            password = "{st.session_state.password}",
+            option = sb_get_event_option(
+                cache = TRUE
+            )
+        )
+        df_sb <- as.data.frame(df_sb)
+        """
+        
+        robjects.r(r_script)
+
+        with localconverter(pandas2ri.converter):
+            r_df = r("df_sb")
+
+        # Process and display data (rest of your logic here)
+        st.write("Data fetched and processed successfully.")
+
+        st.session_state.r_df = r_df
 
 
     _='''
@@ -117,8 +135,9 @@ if login:
         return total_seconds
 
 
-    data = r_df
+    data = st.session_state.r_df
     progs = pd.read_csv('progs.csv')
+    headshots = pd.read_excel('headshots.xlsx')
 
     cleaned_df = data[data['Start'].notna() & (data['Start'] != "")]
     cleaned_df = cleaned_df.reset_index(drop=True)
@@ -145,7 +164,7 @@ if login:
     
     cleaned_df['Distance (m)'] = cleaned_df['Distance (m)'].astype(int)
     cleaned_df['Percentage Prog'] = (cleaned_df['Average Speed']/cleaned_df['Prog (m/s)'])*100
-    cleaned_df = cleaned_df.drop(columns = ['user_id', 'form', 'about', 'end_date', 'entered_by_user_id', 'event_id', 'start_time', 'end_time', 'Duration', 'Duration (s)', 'Prog (s)', 'Start', 'Finish'])
+    cleaned_df = cleaned_df.drop(columns = ['user_id', 'form', 'end_date', 'entered_by_user_id', 'event_id', 'start_time', 'end_time', 'Duration', 'Duration (s)', 'Prog (s)', 'Start', 'Finish'])
         
 
     styled_df = cleaned_df.style.background_gradient(
@@ -155,6 +174,51 @@ if login:
         vmax=100                  # Maximum value of the color scale
     )
 
-    st.dataframe(styled_df)
-else: 
-    st.header('Please enter User Credentials')
+    #st.dataframe(styled_df)
+
+    athlete = st.selectbox('Select Athlete to Analyze',
+                 cleaned_df['about'].unique())
+    
+    athlete_data = cleaned_df[cleaned_df['about']==athlete]
+    fig = go.Figure()    
+    fig.add_trace(go.Scatter(
+			y= athlete_data['Average Speed'],
+            x = athlete_data['start_date'],
+			mode='markers',
+			name='Speed Over Time',
+			line=dict(color='green'),
+            hovertemplate='Split: %{customdata[0]}<extra></extra>',
+    ))
+    fig.data[-1].customdata = athlete_data[['500 Split']].to_numpy()
+    fig.add_trace(go.Scatter(
+			y= athlete_data['Prog (m/s)'],
+            x = athlete_data['start_date'],
+			mode='markers',
+			name='Speed Over Time',
+			line=dict(color='red'),
+    ))
+    fig.update_layout(yaxis_range=[0,np.max(athlete_data['Prog (m/s)'])+1.5])
+    fig.update_layout(
+        hoverlabel=dict(
+            bgcolor="white",
+            font_size=12
+    ))
+
+
+    col3, col4 = st.columns([7,3])
+    with col3:
+        st.plotly_chart(fig)
+    with col4: 
+        st.image(headshots[headshots['Name']==athlete]['Link'].iloc[0])
+
+    #athlete_data = athlete_data.drop(athlete_data.columns[0], axis=1)
+    athlete_df = athlete_data.style.background_gradient(
+            cmap='coolwarm',          # Color scale (blue to red)
+            subset=['Percentage Prog'],         # Apply to the 'Score' column
+            vmin=75,                  # Minimum value of the color scale
+            vmax=100                  # Maximum value of the color scale
+        )
+    
+    st.dataframe(athlete_df)
+    
+ 
