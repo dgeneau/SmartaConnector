@@ -374,7 +374,7 @@ else:
 
     data = st.session_state.r_df
     progs = pd.read_csv('progs.csv')
-    headshots = pd.read_excel('headshots.xlsx')
+    headshots = pd.read_csv('headshots.csv')
 
     cleaned_df = data[data['Start'].notna() & (data['Start'] != "")]
     cleaned_df['Distance (m)'] = pd.to_numeric(cleaned_df['Distance (m)'])
