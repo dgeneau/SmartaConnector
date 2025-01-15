@@ -6,17 +6,9 @@ Messing around with the hand timing inputs
 import pandas as pd
 import streamlit as st
 import numpy as np
-import rpy2.robjects as ro
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 import plotly.graph_objects as go
-
-from rpy2.robjects import globalenv
-from rpy2.robjects import r, pandas2ri, StrVector
-from rpy2.robjects import r,pandas2ri
-from rpy2.robjects.conversion import localconverter
-import rpy2.robjects as robjects
-
 import requests
 import json
 
@@ -223,37 +215,7 @@ else:
     fetch_data = True
 
     if fetch_data:
-        _='''
-        # Fetch data using stored credentials
-        pandas2ri.activate()
-        r_script = f"""
-        library(smartabaseR)
-        start_date <- "{st.session_state.start_str}"
-        end_date <- "{st.session_state.end_str}"
-
-        df_sb <- sb_get_event(
-            form = "RCA Hand Time Monitoring",
-            date_range = c(start_date, end_date),
-            url = "https://canadiansport.smartabase.com/csip",
-            username = "{st.session_state.username}",
-            password = "{st.session_state.password}",
-            option = sb_get_event_option(
-                cache = TRUE
-            )
-        )
-        df_sb <- as.data.frame(df_sb)
-        """
         
-        robjects.r(r_script)
-
-        with localconverter(pandas2ri.converter):
-            r_df = r("df_sb")
-
-        # Process and display data (rest of your logic here)
-        st.write("Data fetched and processed successfully.")
-
-        st.session_state.r_df = r_df
-        '''
         CONFIG = {
             "base_url": "https://canadiansport.smartabase.com/csip",    # Replace {{amsURL}}
             "app_name": "csip",    # Replace {{amsAppName}}
