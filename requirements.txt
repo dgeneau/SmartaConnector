@@ -1,6 +1,6 @@
 numpy
 pandas
-plotlyplotly==5.9.0
+plotly
 python_dateutil==2.8.2
 Requests
 streamlit
