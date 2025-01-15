@@ -4,3 +4,4 @@ plotly
 python_dateutil==2.8.2
 Requests
 streamlit
+matplotlib
