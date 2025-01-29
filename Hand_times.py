@@ -11,6 +11,8 @@ from dateutil.relativedelta import relativedelta
 import plotly.graph_objects as go
 import requests
 import json
+from collections import defaultdict
+from typing import List, Dict, Union
 
 
 #Streamlit App building
@@ -24,6 +26,67 @@ _='''
 Lots of fancy code to get into the API
 
 '''
+
+def expand_dataframe_lists(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Expands a DataFrame by creating new rows from lists in columns, maintaining alignment
+    between corresponding list elements.
+    
+    Parameters:
+    -----------
+    df : pd.DataFrame
+        Input DataFrame where some columns may contain lists
+        
+    Returns:
+    --------
+    pd.DataFrame
+        Expanded DataFrame where lists are converted to individual rows
+    """
+    
+    def is_list_like(x):
+        return isinstance(x, (list, tuple, pd.Series))
+    
+    # Create a copy of the original dataframe
+    result_df = df.copy()
+    
+    # Identify columns containing lists
+    list_columns = []
+    for col in df.columns:
+        if df[col].apply(is_list_like).any():
+            list_columns.append(col)
+    
+    if not list_columns:
+        return result_df
+    
+    # Function to standardize non-list values into lists
+    def standardize_to_list(val: Union[List, str, int, float], length: int) -> List:
+        if is_list_like(val):
+            return list(val)
+        return [val] * length
+    
+    # Process each row
+    expanded_rows = []
+    
+    for idx, row in df.iterrows():
+        # Find the maximum list length in this row
+        max_length = 1
+        for col in list_columns:
+            if is_list_like(row[col]):
+                max_length = max(max_length, len(row[col]))
+        
+        # Create expanded rows
+        for i in range(max_length):
+            new_row = {}
+            for col in df.columns:
+                if col in list_columns:
+                    standardized_list = standardize_to_list(row[col], max_length)
+                    new_row[col] = standardized_list[i] if i < len(standardized_list) else None
+                else:
+                    new_row[col] = row[col]
+            expanded_rows.append(new_row)
+    
+    # Create new DataFrame from expanded rows
+    return pd.DataFrame(expanded_rows).reset_index(drop=True)
 
 class AMSClient:
     def __init__(self, base_url, app_name, app_id=None):
@@ -193,7 +256,7 @@ if not st.session_state.logged_in:
     user_name = st.text_input('Enter your Username')
     password = st.text_input("Enter your Password", type="password")
     login = st.button('Login')
-        # Date range selection
+    # Date range selection
     col1, col2 = st.columns(2)
     with col1:
         start = st.date_input('Start Date', datetime.now() - relativedelta(months=1))
@@ -258,8 +321,7 @@ else:
             thirty_days_ago = today - timedelta(days=30)
             
             # Format dates as dd/mm/yyyy
-            #start_date = thirty_days_ago.strftime("%d/%m/%Y")
-            #end_date = today.strftime("%d/%m/%Y")
+
             start_date = st.session_state.start_str
             end_date = st.session_state.end_str
 
@@ -275,19 +337,121 @@ else:
                 
                 json = json.dumps(response_data, indent=2)
                 pulled_data = pd.DataFrame(response_data['events'])
-
+                def transform_rowing_data(pulled_data: Union[str, Dict]) -> pd.DataFrame:
+                    _="""
+                    Transform nested JSON rowing data into a flat DataFrame.
+                    
+                    Parameters:
+                    -----------
+                    pulled_data : Union[str, Dict]
+                        Input data either as a JSON string or dictionary containing rowing race information
+                    
+                    Returns:
+                    --------
+                    pd.DataFrame
+                        Cleaned and structured DataFrame with race information
+                    """
+                    # Convert string to dictionary if necessary
+                    if isinstance(pulled_data, str):
+                        json_data = json.loads(pulled_data)
+                    else:
+                        json_data = pulled_data
+                    
+                    # Initialize list to store flattened records
+                    records = []
+                    
+                    # Process each event
+                    for event in json_data['events']:
+                        # Base information common to all rows
+                        base_info = {
+                            'formName': event['formName'],
+                            'startDate': datetime.strptime(event['startDate'], '%d/%m/%Y').strftime('%Y-%m-%d'),
+                            'startTime': event['startTime'],
+                            'finishDate': datetime.strptime(event['finishDate'], '%d/%m/%Y').strftime('%Y-%m-%d'),
+                            'finishTime': event['finishTime'],
+                            'userId': event['userId'],
+                            'enteredByUserId': event['enteredByUserId'],
+                            'event_id': event['id']
+                        }
+                        
+                        # Process each row in the event
+                        for row in event['rows']:
+                            record = base_info.copy()
+                            
+                            # Convert pairs to dictionary for easier access
+                            pairs_dict = {pair['key']: pair['value'] for pair in row['pairs']}
+                            
+                            # Add all available fields
+                            record.update({
+                                'Race': pairs_dict.get('Race', '1'),
+                                'Boat Number': pairs_dict.get('Boat Number', '1.0'),
+                                'Boat Class': pairs_dict.get('Boat Class', None),
+                                'Distance (m)': float(pairs_dict.get('Distance (m)', 0)),
+                                'Start': float(pairs_dict.get('Start', 0)),
+                                'Finish': float(pairs_dict.get('Finish', 0)),
+                                'row_number': row['row']
+                            })
+                            
+                            
+                            records.append(record)
+                    
+                    # Create DataFrame
+                    df = pd.DataFrame(records)
+                    return df
+                
+                test = transform_rowing_data(response_data)
+                
+                _='''
+                
                 def process_rows_column(row):
-                    flattened_rows = {}
-                    for row_entry in row:  
-                        for pair in row_entry.get("pairs", []):  
+                    flattened_rows = defaultdict(list)
+                    for row_entry in row:
+                        for pair in row_entry.get("pairs", []):
                             key = pair.get("key", "Unknown Key")
                             value = pair.get("value", "Unknown Value")
-                            flattened_rows[key] = value
-                    return flattened_rows
+                            flattened_rows[key].append(value)
+                    # Convert defaultdict to normal dict
+                    return dict(flattened_rows)
+
                 expanded_rows = pulled_data['rows'].apply(process_rows_column)
                 expanded_rows_df = pd.DataFrame(expanded_rows.tolist())
+
+                expanded_rows_df = expand_dataframe_lists(expanded_rows_df)
+
+                
                 data_cleaned = pd.concat([pulled_data.drop(columns=['rows']), expanded_rows_df], axis=1)
-                st.session_state.r_df = data_cleaned
+               
+                
+                possible_list_cols = []
+                for col in data_cleaned.columns:
+                    # Check if any cell in this column is a list
+                    if data_cleaned[col].apply(lambda x: isinstance(x, list)).any():
+                        possible_list_cols.append(col)
+
+                # Explode each list-column
+                possible_list_cols = ['Race', 'Start', 'Finish', 'Boat Class', 'Distance (m)', 'Boat Number']
+                for col in possible_list_cols:
+                    data_cleaned = data_cleaned.explode(col)
+                    agg_dict = {}
+
+                clean_list = ['Race', 'Start', 'Finish', 'Boat Class', 'Distance (m)', 'Boat Number', 'startDate', 'finishDate', 'userId']
+                for col in data_cleaned.columns:
+                    if col not in clean_list:
+                        agg_dict[col] = lambda x: list(x)
+                
+                # Perform groupby, converting rows in each group to lists
+                df_combined = data_cleaned.groupby(clean_list, as_index=False).agg(agg_dict)
+                #df_combined['startDate_formatted'] = pd.to_datetime(df_combined['startDate'])
+                ecol_list = ['id', 'startTime', 'finishTime', 'enteredByUserId', 'formName']
+                for extra_col in ecol_list: 
+                    df_combined[extra_col] = df_combined[extra_col].apply(lambda x: x[0] if isinstance(x, list) else x)
+                
+                df_combined = df_combined.sort_values(by='startDate', ascending=True)
+                
+                '''
+                #st.write(df_combined)
+                
+                st.session_state.r_df = test
             else:
                 st.write("\nNo data returned from API")
         else:
@@ -376,7 +540,8 @@ else:
     progs = pd.read_csv('progs.csv')
     headshots = pd.read_csv('headshots.csv')
 
-    cleaned_df = data[data['Start'].notna() & (data['Start'] != "")]
+    cleaned_df = data[(data['Finish'] != 0)]
+    #cleaned_df = data[(data['Finish'] != 0) & (data['Start'] != 0)]
     cleaned_df['Distance (m)'] = pd.to_numeric(cleaned_df['Distance (m)'])
     cleaned_df = cleaned_df.reset_index(drop=True)
     cleaned_df['Start'] = pd.to_numeric(cleaned_df['Start'], errors='coerce')
@@ -447,7 +612,7 @@ else:
         x=athlete_data['startDate'],
         mode='markers+lines',
         name='Speed Over Time',
-        line=dict(color='green'),
+        line=dict(color='red'),
         hovertemplate='Split: %{customdata[0]}<extra></extra>',
     ))
     fig.data[-1].customdata = athlete_data[['500 Split']].to_numpy()
@@ -462,9 +627,10 @@ else:
     ))
 
     # Bar chart for win_diff on secondary y-axis
-    fig.add_trace(go.Bar(
+    fig.add_trace(go.Scatter(
         y=athlete_data['win_diff'],
         x=athlete_data['startDate'],
+        mode = 'markers',
         name='Win Difference',
         yaxis='y2',  # Assign to secondary y-axis
         opacity = 0.4, 
@@ -497,7 +663,6 @@ else:
     )
 
 
-
     col3, col4 = st.columns([7,3])
     with col3:
         st.plotly_chart(fig)
@@ -518,6 +683,8 @@ else:
             vmax=100                  # Maximum value of the color scale
         )
     
+
     st.dataframe(athlete_df)
+
     
  
