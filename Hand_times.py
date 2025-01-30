@@ -692,6 +692,7 @@ else:
         cols = day_data.columns.tolist()
         cols = cols[-1:] + cols[:-1]
         day_data = day_data[cols]
+        day_data = day_data.reset_index(drop=True)
 
         display_df = day_data.style.background_gradient(
                 cmap='coolwarm',          # Color scale (blue to red)
