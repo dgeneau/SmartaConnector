@@ -294,7 +294,6 @@ else:
         
         # Login
         if client.login(CONFIG["username"], CONFIG["password"]):
-            st.write("Yes Successfully logged in")
             
             if st.session_state.groups_data is None:
                 st.write('Pulling Athletes')
@@ -559,46 +558,11 @@ else:
         athlete_data = cleaned_df[cleaned_df['about']==athlete]
         
         fig = go.Figure()
-        _='''
-        for date in athlete_data['startDate'].unique():
-            #if len(athlete_data['Race'][athlete_data['startDate']==date])>1:
-            for race in athlete_data['Race'][athlete_data['startDate']==date]:
-                subset = athlete_data[athlete_data['Race'] == race]
-                fig.add_trace(go.Bar(
-                    x=subset['startDate'],
-                    y=subset['win_diff'],
-                    #name=f'Win Diff: {race}', 
-                    yaxis = 'y2',
-                    showlegend= False,
-                    marker=dict(
-                        color=subset['win_diff'],
-                        colorscale='RdBu',
-                        cmin=0,
-                        cmax=10),
-                        opacity=0.6
-                ))
-
-        
-
-        fig.add_trace(go.Bar(
-            x=athlete_data['startDate'],
-            y=athlete_data['win_diff'],
-            name='Win Difference',
-            opacity=0.4,
-            marker=dict(
-                color=athlete_data['win_diff'],
-                colorscale='RdBu',
-                cmin=0,
-                cmax=10,
-                # colorbar=dict(title='Win Diff')  # Uncomment if you want a color bar
-            ),
-            # Remove mode='markers' since it's not applicable to Bar
-            yaxis='y2' 
-        ))
-        '''
+ 
         # Scatter plot for Average Speed
         fig.add_trace(go.Scatter(
-            y=athlete_data['Average Speed'],
+            #y=athlete_data['Average Speed'],
+            y=athlete_data['Average Speed']/athlete_data['Prog (m/s)']*100,
             x=athlete_data['startDate'],
             mode='markers',
             name='Session Speed',
@@ -611,35 +575,37 @@ else:
         speed_avgs = []
         for date in athlete_data['startDate'].unique():
             dates.append(date)
-            speed = athlete_data['Average Speed'][athlete_data['startDate'] == date].mean()
+            speed = athlete_data['Percentage Prog'][athlete_data['startDate'] == date].mean()
             speed_avgs.append(speed)
-
+        
         fig.add_trace(go.Scatter(
-            y=speed_avgs,
+            y=(np.array(speed_avgs)),
             x=dates,
             mode='lines',
             name='Speed Trend',
-            line=dict(color='red'),
+            line=dict(color='red', dash='dash'),
         ))
+
         # Scatter plot for Prog Speed
         fig.add_trace(go.Scatter(
-            y=athlete_data['Prog (m/s)'],
-            x=athlete_data['startDate'],
-            mode='markers',
+            y=(athlete_data['Prog (m/s)']/athlete_data['Prog (m/s)'])*100,
+            x= athlete_data['startDate'],
+            mode='lines',
             name='Prog Speed',
             marker=dict(color='gold',
                         size = 10),
         ))
 
-        # Bar chart for win_diff on secondary y-axis
-    
 
         # Update layout to include secondary y-axis
         fig.update_layout(
-            barmode = 'group',
+            xaxis=dict(
+                title = 'Date'
+            ),
             yaxis=dict(
-                title="Speed (m/s)",
-                range=[np.min(athlete_data['Average Speed'])-1, np.max(athlete_data['Prog (m/s)']) + 1.5],
+                title="Percentage Prog (%)",
+                range = [athlete_data['Percentage Prog'].min()-10,110]
+                #range=[np.min(athlete_data['Average Speed'])-1, np.max(athlete_data['Prog (m/s)']) + 1.5],
             ),
             yaxis2=dict(
                 title="Win Difference (%)",
@@ -657,6 +623,7 @@ else:
 
         col3, col4 = st.columns([7.5,2.5])
         with col3:
+            st.header('Athelte Prognosis Results Over Time')
             st.plotly_chart(fig)
         with col4: 
             st.image(headshots[headshots['Name']==athlete]['Link'].iloc[0])
@@ -686,7 +653,7 @@ else:
 
         day_data['crew'] = day_data.groupby('win_diff')['about'].transform(lambda x: ', '.join(x))
         
-        day_data = day_data.drop(columns = ['event_id', 'row_number', 'firstname', 'lastname', 'about'])
+        day_data = day_data.drop(columns = ['Start (c)','Finish (c)', 'Prog (m/s)', 'event_id', 'row_number', 'firstname', 'lastname', 'about'])
         day_data.drop_duplicates(keep='first', inplace=True)
 
         cols = day_data.columns.tolist()
