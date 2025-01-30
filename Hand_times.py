@@ -651,7 +651,7 @@ else:
         day = st.selectbox('Select Date for Analyis', cleaned_df['startDate'].unique() , placeholder="Choose a Date") 
         day_data = cleaned_df[cleaned_df['startDate']==day]
 
-        day_data['crew'] = day_data.groupby('win_diff')['about'].transform(lambda x: ', '.join(x))
+        day_data['crew'] = day_data.groupby('Percentage Prog')['lastname'].transform(lambda x: ', '.join(x))
         
         day_data = day_data.drop(columns = ['Start (c)','Finish (c)', 'Prog (m/s)', 'event_id', 'row_number', 'firstname', 'lastname', 'about'])
         day_data.drop_duplicates(keep='first', inplace=True)
