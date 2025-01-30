@@ -15,6 +15,8 @@ from collections import defaultdict
 from typing import List, Dict, Union
 
 
+st.set_page_config(layout="wide")
+
 #Streamlit App building
 image, title = st.columns([1,9])
 with image: 
@@ -274,9 +276,7 @@ if not st.session_state.logged_in:
 else:
     st.write(f"Logged in as: {st.session_state.username}")
 
-
     fetch_data = True
-
     if fetch_data:
         
         CONFIG = {
@@ -337,6 +337,7 @@ else:
                 
                 json = json.dumps(response_data, indent=2)
                 pulled_data = pd.DataFrame(response_data['events'])
+                
                 def transform_rowing_data(pulled_data: Union[str, Dict]) -> pd.DataFrame:
                     _="""
                     Transform nested JSON rowing data into a flat DataFrame.
@@ -400,56 +401,6 @@ else:
                     return df
                 
                 test = transform_rowing_data(response_data)
-                
-                _='''
-                
-                def process_rows_column(row):
-                    flattened_rows = defaultdict(list)
-                    for row_entry in row:
-                        for pair in row_entry.get("pairs", []):
-                            key = pair.get("key", "Unknown Key")
-                            value = pair.get("value", "Unknown Value")
-                            flattened_rows[key].append(value)
-                    # Convert defaultdict to normal dict
-                    return dict(flattened_rows)
-
-                expanded_rows = pulled_data['rows'].apply(process_rows_column)
-                expanded_rows_df = pd.DataFrame(expanded_rows.tolist())
-
-                expanded_rows_df = expand_dataframe_lists(expanded_rows_df)
-
-                
-                data_cleaned = pd.concat([pulled_data.drop(columns=['rows']), expanded_rows_df], axis=1)
-               
-                
-                possible_list_cols = []
-                for col in data_cleaned.columns:
-                    # Check if any cell in this column is a list
-                    if data_cleaned[col].apply(lambda x: isinstance(x, list)).any():
-                        possible_list_cols.append(col)
-
-                # Explode each list-column
-                possible_list_cols = ['Race', 'Start', 'Finish', 'Boat Class', 'Distance (m)', 'Boat Number']
-                for col in possible_list_cols:
-                    data_cleaned = data_cleaned.explode(col)
-                    agg_dict = {}
-
-                clean_list = ['Race', 'Start', 'Finish', 'Boat Class', 'Distance (m)', 'Boat Number', 'startDate', 'finishDate', 'userId']
-                for col in data_cleaned.columns:
-                    if col not in clean_list:
-                        agg_dict[col] = lambda x: list(x)
-                
-                # Perform groupby, converting rows in each group to lists
-                df_combined = data_cleaned.groupby(clean_list, as_index=False).agg(agg_dict)
-                #df_combined['startDate_formatted'] = pd.to_datetime(df_combined['startDate'])
-                ecol_list = ['id', 'startTime', 'finishTime', 'enteredByUserId', 'formName']
-                for extra_col in ecol_list: 
-                    df_combined[extra_col] = df_combined[extra_col].apply(lambda x: x[0] if isinstance(x, list) else x)
-                
-                df_combined = df_combined.sort_values(by='startDate', ascending=True)
-                
-                '''
-                #st.write(df_combined)
                 
                 st.session_state.r_df = test
             else:
@@ -554,8 +505,8 @@ else:
     cleaned_df['Average Speed'] = cleaned_df['Distance (m)']/cleaned_df['Duration (s)']
     cleaned_df['500 Split'] = (500/cleaned_df['Average Speed']).apply(seconds_to_mmssmm)
  
-    ID_df = st.session_state.groups_data
 
+    ID_df = st.session_state.groups_data
 
     merged_data = pd.merge(cleaned_df, ID_df, how='left', left_on ='userId', right_on = 'id')
     cols_to_drop = [col for col in merged_data.columns if col.startswith("id")]
@@ -563,6 +514,7 @@ else:
     merged_data['about'] = merged_data['firstname'] + " " + merged_data['lastname'] 
     cleaned_df = merged_data
     prog_times = []
+
     for bclass in cleaned_df['Boat Class']: 
         
         prog = progs[progs['Class']==bclass]
@@ -577,114 +529,179 @@ else:
     
 
     appended_dfs = []
-    for date in cleaned_df['startDate'].unique(): 
+    for date in cleaned_df['startDate'].unique():
         date_df = cleaned_df[cleaned_df['startDate']==date]
-        max_prog_day = np.max(date_df['Percentage Prog'])
-        date_df['win_diff'] = max_prog_day - date_df['Percentage Prog']
-        appended_dfs.append(date_df)
+        for race in date_df['Race'].unique():
+            race_df = date_df[date_df['Race'] == race]
+            max_prog_day = np.max(race_df['Percentage Prog'])
+            race_df['win_diff'] = max_prog_day - race_df['Percentage Prog']
+            appended_dfs.append(race_df)
 
     # Concatenate all the dataframes in the list into a single dataframe
-    final_df = pd.concat(appended_dfs, ignore_index=True) 
-    cleaned_df = final_df
-
-    
+    cleaned_df = pd.concat(appended_dfs, ignore_index=True) 
     cleaned_df = cleaned_df.drop(columns = ['userId', 'formName', 'finishDate', 'finishTime', 'enteredByUserId', 'startTime', 'Duration', 'Duration (s)', 'Prog (s)', 'Start', 'Finish'])
-        
 
-    styled_df = cleaned_df.style.background_gradient(
-        cmap='coolwarm',          # Color scale (blue to red)
-        subset=['Percentage Prog'],  # Apply to the 'Score' column
-        vmin=75,                  # Minimum value of the color scale
-        vmax=100                  # Maximum value of the color scale
-    )
+    analysis  = st.sidebar.selectbox('Select Analysis', ['Athlete', 'Day Report'])
 
+    if analysis == 'Athlete':     
 
-    athlete = st.selectbox('Select Athlete to Analyze',
-                 cleaned_df['about'].unique())
-    
-    athlete_data = cleaned_df[cleaned_df['about']==athlete]
-    
-    fig = go.Figure()    
-
-    # Scatter plot for Average Speed
-    fig.add_trace(go.Scatter(
-        y=athlete_data['Average Speed'],
-        x=athlete_data['startDate'],
-        mode='markers+lines',
-        name='Speed Over Time',
-        line=dict(color='red'),
-        hovertemplate='Split: %{customdata[0]}<extra></extra>',
-    ))
-    fig.data[-1].customdata = athlete_data[['500 Split']].to_numpy()
-
-    # Scatter plot for Prog Speed
-    fig.add_trace(go.Scatter(
-        y=athlete_data['Prog (m/s)'],
-        x=athlete_data['startDate'],
-        mode='markers+lines',
-        name='Prog Speed',
-        line=dict(color='gold'),
-    ))
-
-    # Bar chart for win_diff on secondary y-axis
-    fig.add_trace(go.Scatter(
-        y=athlete_data['win_diff'],
-        x=athlete_data['startDate'],
-        mode = 'markers',
-        name='Win Difference',
-        yaxis='y2',  # Assign to secondary y-axis
-        opacity = 0.4, 
-            marker=dict(
-        color=athlete_data['win_diff'],  # Set color based on the data values
-        colorscale='RdBu',  # Red-Blue color scale
-        cmin=0,  # Minimum value for the color scale
-        cmax=10,  # Maximum value for the color scale
-        #colorbar=dict(title='Win Diff')  # Add a colorbar for reference
-    )
-    ))
-
-    # Update layout to include secondary y-axis
-    fig.update_layout(
-        yaxis=dict(
-            title="Speed (m/s)",
-            range=[0, np.max(athlete_data['Prog (m/s)']) + 1.5],
-        ),
-        yaxis2=dict(
-            title="Win Difference (%)",
-            overlaying='y',
-            side='right',  # Secondary axis on the right side
-            showgrid = False, 
-            range = [0,20]
-        ),
-        hoverlabel=dict(
-            bgcolor="white",
-            font_size=12
-        )
-    )
-
-
-    col3, col4 = st.columns([7,3])
-    with col3:
-        st.plotly_chart(fig)
-    with col4: 
-        st.image(headshots[headshots['Name']==athlete]['Link'].iloc[0])
-
-    col5,col6, col7 = st.columns(3)
-    with col5: 
-        st.metric('Average Prog', round(np.mean(athlete_data['Percentage Prog']),2), delta = round(np.mean(athlete_data['Percentage Prog'])-100,2))
-    with col6: 
-        st.metric('Average Win % Diff', round(np.mean(athlete_data['win_diff']),1))
-
-    #athlete_data = athlete_data.drop(columns = ['first_name', 'last_name', 'Prog (m/s)'])
-    athlete_df = athlete_data.style.background_gradient(
+        styled_df = cleaned_df.style.background_gradient(
             cmap='coolwarm',          # Color scale (blue to red)
-            subset=['Percentage Prog'],         # Apply to the 'Score' column
+            subset=['Percentage Prog'],  # Apply to the 'Score' column
             vmin=75,                  # Minimum value of the color scale
             vmax=100                  # Maximum value of the color scale
         )
+
+
+        athlete = st.selectbox('Select Athlete to Analyze',
+                    cleaned_df['about'].unique())
+        
+        athlete_data = cleaned_df[cleaned_df['about']==athlete]
+        
+        fig = go.Figure()
+        _='''
+        for date in athlete_data['startDate'].unique():
+            #if len(athlete_data['Race'][athlete_data['startDate']==date])>1:
+            for race in athlete_data['Race'][athlete_data['startDate']==date]:
+                subset = athlete_data[athlete_data['Race'] == race]
+                fig.add_trace(go.Bar(
+                    x=subset['startDate'],
+                    y=subset['win_diff'],
+                    #name=f'Win Diff: {race}', 
+                    yaxis = 'y2',
+                    showlegend= False,
+                    marker=dict(
+                        color=subset['win_diff'],
+                        colorscale='RdBu',
+                        cmin=0,
+                        cmax=10),
+                        opacity=0.6
+                ))
+
+        
+
+        fig.add_trace(go.Bar(
+            x=athlete_data['startDate'],
+            y=athlete_data['win_diff'],
+            name='Win Difference',
+            opacity=0.4,
+            marker=dict(
+                color=athlete_data['win_diff'],
+                colorscale='RdBu',
+                cmin=0,
+                cmax=10,
+                # colorbar=dict(title='Win Diff')  # Uncomment if you want a color bar
+            ),
+            # Remove mode='markers' since it's not applicable to Bar
+            yaxis='y2' 
+        ))
+        '''
+        # Scatter plot for Average Speed
+        fig.add_trace(go.Scatter(
+            y=athlete_data['Average Speed'],
+            x=athlete_data['startDate'],
+            mode='markers',
+            name='Session Speed',
+            line=dict(color='red'),
+            hovertemplate='Split: %{customdata[0]}<extra></extra>',
+        ))
+        fig.data[-1].customdata = athlete_data[['500 Split']].to_numpy()
+        
+        dates = []
+        speed_avgs = []
+        for date in athlete_data['startDate'].unique():
+            dates.append(date)
+            speed = athlete_data['Average Speed'][athlete_data['startDate'] == date].mean()
+            speed_avgs.append(speed)
+
+        fig.add_trace(go.Scatter(
+            y=speed_avgs,
+            x=dates,
+            mode='lines',
+            name='Speed Trend',
+            line=dict(color='red'),
+        ))
+        # Scatter plot for Prog Speed
+        fig.add_trace(go.Scatter(
+            y=athlete_data['Prog (m/s)'],
+            x=athlete_data['startDate'],
+            mode='markers',
+            name='Prog Speed',
+            marker=dict(color='gold',
+                        size = 10),
+        ))
+
+        # Bar chart for win_diff on secondary y-axis
     
 
-    st.dataframe(athlete_df)
+        # Update layout to include secondary y-axis
+        fig.update_layout(
+            barmode = 'group',
+            yaxis=dict(
+                title="Speed (m/s)",
+                range=[np.min(athlete_data['Average Speed'])-1, np.max(athlete_data['Prog (m/s)']) + 1.5],
+            ),
+            yaxis2=dict(
+                title="Win Difference (%)",
+                overlaying='y',
+                side='right',  # Secondary axis on the right side
+                showgrid = False, 
+                range = [0,20]
+            ),
+            hoverlabel=dict(
+                bgcolor="white",
+                font_size=12
+            )
+        )
 
-    
+
+        col3, col4 = st.columns([7.5,2.5])
+        with col3:
+            st.plotly_chart(fig)
+        with col4: 
+            st.image(headshots[headshots['Name']==athlete]['Link'].iloc[0])
+
+        col5,col6, col7 = st.columns(3)
+        with col5: 
+            st.metric('Average Prog', round(np.mean(athlete_data['Percentage Prog']),2), delta = round(np.mean(athlete_data['Percentage Prog'])-100,2))
+        with col6: 
+            st.metric('Average Win % Diff', round(np.mean(athlete_data['win_diff']),1))
+
+
+
+        athlete_data = athlete_data.drop(columns = ['Prog (m/s)','event_id', 'row_number', 'Prog (m/s)', 'firstname', 'lastname', 'about'])
+        athlete_df = athlete_data.style.background_gradient(
+                cmap='coolwarm',          # Color scale (blue to red)
+                subset=['Percentage Prog'],         # Apply to the 'Score' column
+                vmin=70,                  # Minimum value of the color scale
+                vmax=100                  # Maximum value of the color scale
+            )
+        
+
+        st.dataframe(athlete_df)
+    elif analysis == 'Day Report':
+        
+        day = st.selectbox('Select Date for Analyis', cleaned_df['startDate'].unique() , placeholder="Choose a Date") 
+        day_data = cleaned_df[cleaned_df['startDate']==day]
+
+        day_data['crew'] = day_data.groupby('win_diff')['about'].transform(lambda x: ', '.join(x))
+        
+        day_data = day_data.drop(columns = ['event_id', 'row_number', 'firstname', 'lastname', 'about'])
+        day_data.drop_duplicates(keep='first', inplace=True)
+
+        cols = day_data.columns.tolist()
+        cols = cols[-1:] + cols[:-1]
+        day_data = day_data[cols]
+
+        display_df = day_data.style.background_gradient(
+                cmap='coolwarm',          # Color scale (blue to red)
+                subset=['Percentage Prog'],    # Apply to the 'Score' column
+                vmin=70,                  # Minimum value of the color scale
+                vmax=100                  # Maximum value of the color scale
+            )
+
+        st.dataframe(display_df, height=35*len(day_data)+38)
+
+        
+        
  
