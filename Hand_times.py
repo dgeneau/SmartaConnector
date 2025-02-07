@@ -623,7 +623,7 @@ else:
 
         col3, col4 = st.columns([7.5,2.5])
         with col3:
-            st.header('Athelte Prognosis Results Over Time')
+            st.header('Athlete Prognosis Results Over Time')
             st.plotly_chart(fig)
         with col4: 
             st.image(headshots[headshots['Name']==athlete]['Link'].iloc[0])
